@@ -1,0 +1,28 @@
+Mon write up pour le challenge IDOR sur le HackTonLycée 2025 :
+
+Petit rappel : Qu'est-ce qu'un IDOR premièrement, c'est primordial de le savoir ici.
+
+Un IDOR est une vulnérabilité de sécurité qui se produit quand une application permet à un utilisateur d'accéder
+directement à des objets type fichiers données via un ID ou autre sans vérification appropriée des autorisations
+En gros avec IDOR : Toutes les clés sont identiques et numérotées 1, 2, 3...
+Donc tu peux ouvrir le casier n°572 même si tu n'es que le numéro 1 ( Notre cas ) 
+
+Étape 1 : Après avoir cliqué sur le liens du challenge nous arrivons sur une page sur laquelle nous voyons "mon profil", après avoir cliqué dessus on se rend compte
+l'identifiant utilisateur est passé en paramètre ici : http://15.236.204.114:1237/profile.php?id=1
+
+En testant une via un curl basique nous obtenons 
+
+┌──(szzaps㉿vulnhub)-[~]
+└─$ curl "http://15.236.204.114:1237/profile.php?id=572"
+403 Forbidden - Access to administrator profile requires special header
+
+Evidemment le test en base64 et sans encodage n'est pas concluant car c'est détécté par le filtre
+
+
+┌──(szzaps㉿vulnhub)-[~]
+└─$ curl -H "X-Forwarded-For: 127.0.0.1" "http://15.236.204.114:1237/profile.php?id=572"
+403 Forbidden - Access to administrator profile requires special header
+
+┌──(szzaps㉿vulnhub)-[~]
+└─$ curl -H "X-Forwarded-For: MTI3LjAuMC4x" "http://15.236.204.114:1237/profile.php?id=572"
+403 Forbidden - Access to administrator profile requires special header
